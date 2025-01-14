@@ -1,0 +1,136 @@
+name: CI/CD Pipeline
+
+# 控制何时触发工作流
+on:
+  # 推送到特定分支时触发
+  push:
+    branches:
+      - main
+      - 'release/*'
+  # 在合并 pull request 时触发
+  pull_request:
+    branches:
+      - main
+  # 可以手动触发
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Choose environment'
+        required: true
+        default: 'production'
+  # 定时触发，每天午夜12点
+  schedule:
+    - cron: '0 0 * * *'
+
+# 定义工作流的并行/顺序执行的 Job
+jobs:
+  # 定义一个名为 build 的 job
+  build:
+    # 运行在哪个环境上
+    runs-on: ubuntu-latest
+
+    # 如果某个步骤失败，是否终止整个 job
+    fail-fast: false
+
+    # 允许并发运行多少个 job
+    concurrency:
+      group: build-${{ github.ref }}
+      cancel-in-progress: true
+
+    # 启用 job 的输出以便在其它 job 中引用
+    outputs:
+      artifact-path: ${{ steps.upload-artifact.outputs.artifact-path }}
+
+    steps:
+      # 使用官方的 GitHub Actions checkout，检查代码
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 设置 Node.js 环境，并安装依赖
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+          cache: 'npm'
+
+      # 安装依赖
+      - name: Install dependencies
+        run: npm install
+
+      # 运行单元测试
+      - name: Run tests
+        run: npm test
+
+      # 构建应用
+      - name: Build the application
+        run: npm run build
+
+      # 上传构建产物到 GitHub artifact
+      - name: Upload build artifact
+        id: upload-artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: ./dist
+
+  # 定义一个部署 job
+  deploy:
+    # 该 job 依赖于 build job 的成功
+    needs: build
+    runs-on: ubuntu-latest
+
+    # 在部署前先检查环境变量
+    environment:
+      name: production
+      url: ${{ steps.deploy-to-prod.outputs.deployment-url }}
+
+    steps:
+      # 使用官方的 GitHub Actions checkout，检查代码
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 设置 Node.js 环境
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      # 下载构建产物
+      - name: Download build artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: build-artifacts
+
+      # 部署到生产环境
+      - name: Deploy to production
+        id: deploy-to-prod
+        run: |
+          echo "Deploying to production..."
+          # 这里可以是你实际的部署脚本，比如使用 `scp` 或者 `rsync`，或其他工具
+          # 如下为示例，实际根据需求修改：
+          scp -r ./dist/* user@production-server:/var/www/app
+        continue-on-error: false
+
+  # 定义一个用于通知的 job
+  notify:
+    runs-on: ubuntu-latest
+    needs: [build, deploy]
+    if: success()
+
+    steps:
+      # 发送成功通知邮件
+      - name: Send success notification
+        run: |
+          echo "The deployment was successful!" | mail -s "Deployment Success" user@example.com
+
+  # 失败时发送通知
+  notify_failure:
+    runs-on: ubuntu-latest
+    needs: [build, deploy]
+    if: failure()
+
+    steps:
+      # 发送失败通知邮件
+      - name: Send failure notification
+        run: |
+          echo "The deployment failed!" | mail -s "Deployment Failed" user@example.com
