@@ -72,6 +72,54 @@ jobs:
         with:
           name: build-artifacts
           path: ./dist
+# 定义一个名为 build 的 job
+build2:
+    # 运行在哪个环境上
+    runs-on: ubuntu-latest
+
+    # 如果某个步骤失败，是否终止整个 job
+    fail-fast: false
+
+    # 允许并发运行多少个 job
+    concurrency:
+      group: build-${{ github.ref }}
+      cancel-in-progress: true
+
+    # 启用 job 的输出以便在其它 job 中引用
+    outputs:
+      artifact-path: ${{ steps.upload-artifact.outputs.artifact-path }}
+
+    steps:
+      # 使用官方的 GitHub Actions checkout，检查代码
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 设置 Node.js 环境，并安装依赖
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+          cache: 'npm'
+
+      # 安装依赖
+      - name: Install dependencies
+        run: npm install
+
+      # 运行单元测试
+      - name: Run tests
+        run: npm test
+
+      # 构建应用
+      - name: Build the application
+        run: npm run build
+
+      # 上传构建产物到 GitHub artifact
+      - name: Upload build artifact
+        id: upload-artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: ./dist
 
   # 定义一个部署 job
   deploy:
